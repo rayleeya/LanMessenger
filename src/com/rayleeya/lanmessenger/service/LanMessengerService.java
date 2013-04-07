@@ -31,9 +31,10 @@ import com.rayleeya.lanmessenger.model.Group;
 import com.rayleeya.lanmessenger.model.User;
 import com.rayleeya.lanmessenger.net.UdpManager;
 import com.rayleeya.lanmessenger.ui.ChatRoomActivity;
-import com.rayleeya.lanmessenger.util.Errors;
+import com.rayleeya.lanmessenger.util.Events;
 import com.rayleeya.lanmessenger.util.Settings;
 import com.rayleeya.lanmessenger.util.Utils;
+import com.rayleeya.lanmessenger.voice.VoiceManager;
 
 public class LanMessengerService extends Service {
 
@@ -54,16 +55,16 @@ public class LanMessengerService extends Service {
 		super.onCreate();
 		if (DEBUG) Log.v(TAG, "onCreate()");
 		
-		int error = Errors.NO_ERROR;
+		int error = Events.NO_ERROR;
 		UdpManager udpManager = null;
 		try {
 			udpManager = UdpManager.getInstance();
 		} catch (BindException e) {
 			e.printStackTrace();
-			error = Errors.ERR_SO_ADDR_ALREADY_IN_USE;
+			error = Events.ERR_SO_ADDR_ALREADY_IN_USE;
 		} catch (SocketException e) {
 			e.printStackTrace();
-			error = Errors.ERR_SO;
+			error = Events.ERR_SO;
 		}
 		
 		mGroups = new HashMap<String, Group>();
@@ -133,10 +134,10 @@ public class LanMessengerService extends Service {
 		return mSelf;
 	}
 	
-	
 	//-------- Error Observerable/Observers --------
-	public interface OnErrorListener {
+	public interface OnEventListener {
 		public void onError(int errno, String msg);
+		public void onMessage(int msgno, int arg1, int arg2, Object obj);
 	}
 			
 	//------------------------------------------------------------------------------------------
@@ -149,6 +150,7 @@ public class LanMessengerService extends Service {
 		
 		private MsgSenderThread mSender;
 		private MsgReceiverThread mReceiver;
+		private VoiceManager mVoiceManager;
 		private H mH;
 		
 		private Comparator<User> mUserComparator = new Comparator<User>() {
@@ -198,8 +200,7 @@ public class LanMessengerService extends Service {
 						break;
 						
 					case MSG_RECEIVE_VOICE_RES :
-						//TODO: work is here.
-//						receiveVoidResponse((SocketAddress)msg.obj, msg.arg1);
+						notifyMessage(Events.MSG_RECV_VOICE_RES, msg.arg1, 0, (SocketAddress)msg.obj);
 						break;
 				}
 			}
@@ -211,26 +212,50 @@ public class LanMessengerService extends Service {
 			mH = new H();
 		}
 		
-		private final ArrayList<OnErrorListener> mErrorListeners = new ArrayList<OnErrorListener>();
-		private int errorcode = Errors.NO_ERROR;
+		private final ArrayList<OnEventListener> mEventListeners = new ArrayList<OnEventListener>();
 		
-		public void regitsterOnErrorListener(OnErrorListener listener) {
-			mErrorListeners.add(listener);
+		public void regitsterOnEventListener(OnEventListener listener) {
+			mEventListeners.add(listener);
 		}
 		
-		public void unregitsterOnErrorListener(OnErrorListener listener) {
-			mErrorListeners.remove(listener);
+		public void unregitsterOnEventListener(OnEventListener listener) {
+			mEventListeners.remove(listener);
 		}
 		
+		//------------- About Messages
+		private int msgcode = Events.NO_MSG;
+		private void notifyMessage(int msgno, int arg1, int arg2, Object obj) {
+			msgcode = msgno;
+			for (OnEventListener l : mEventListeners) {
+				l.onMessage(msgno, arg1, arg2, obj);
+			}
+		}
+		
+		public int getMessage() {
+			return msgcode;
+		}
+		
+		public void setMessage(int msg) {
+			msgcode = msg;
+		}
+		
+		public boolean hasMessage() {
+			return msgcode != Events.NO_MSG;
+		}
+		
+		//------------- About Errors
+		private int errorcode = Events.NO_ERROR;
 		private void notifyError(int errno) {
+			errorcode = errno;
+			
 			String msg = ""; //Unknown error
 			switch (errno) {
-				case Errors.ERR_SO : 
+				case Events.ERR_SO : 
 				//TODO: More detail error handlers
 				break;
 			}
 			
-			for (OnErrorListener l : mErrorListeners) {
+			for (OnEventListener l : mEventListeners) {
 				l.onError(errno, msg);
 			}
 		}
@@ -249,8 +274,10 @@ public class LanMessengerService extends Service {
 		}
 		
 		public boolean hasError() {
-			return errorcode != Errors.NO_ERROR;
+			return errorcode != Events.NO_ERROR;
 		}
+		
+		
 		//-------- Data Set Observerable/Observers --------
 		private final DataSetObservable mDataSetObservable = new DataSetObservable();
 	    
@@ -403,6 +430,7 @@ public class LanMessengerService extends Service {
 			return true;
 		}
 		
+		//-------------------------------------------------------
 		public User getSelfUser() {
 			return mSelf;
 		}
@@ -446,10 +474,22 @@ public class LanMessengerService extends Service {
 			return user;
 		}
 		
+		//-------------------------------------------------------
 		public void quit() {
 			mSender.quit();
 			mReceiver.quit();
+			stopVoidMsg();
+		}
+		
+		//-------------------------------------------------------
+		@Override
+		public void startVoiceMsg(SocketAddress obj) {
+			if (mVoiceManager == null) mVoiceManager = new VoiceManager();
+			mVoiceManager.start();
 		}
 
+		public void stopVoidMsg() {
+			if (mVoiceManager != null) mVoiceManager.stop();
+		}
 	}
 }

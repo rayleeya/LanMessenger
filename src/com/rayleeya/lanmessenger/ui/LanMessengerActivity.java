@@ -22,9 +22,9 @@ import com.rayleeya.lanmessenger.BuildConfig;
 import com.rayleeya.lanmessenger.R;
 import com.rayleeya.lanmessenger.model.Group;
 import com.rayleeya.lanmessenger.service.ILanMessenger;
-import com.rayleeya.lanmessenger.service.LanMessengerService.OnErrorListener;
 import com.rayleeya.lanmessenger.service.LanMessengerService;
-import com.rayleeya.lanmessenger.util.Errors;
+import com.rayleeya.lanmessenger.service.LanMessengerService.OnEventListener;
+import com.rayleeya.lanmessenger.util.Events;
 
 public class LanMessengerActivity extends Activity {
 
@@ -55,10 +55,16 @@ public class LanMessengerActivity extends Activity {
 	}
 	
 	private LanMessengerListener mListener;
-	private class LanMessengerListener extends DataSetObserver implements OnErrorListener {
+	private boolean hasListener;
+	private class LanMessengerListener extends DataSetObserver implements OnEventListener {
 		@Override
 		public void onError(int errno, String msg) {
 			//TODO: handle errors
+		}
+		
+		@Override
+		public void onMessage(int eveno, int arg1, int arg2, Object obj) {
+			
 		}
 
 		@Override
@@ -127,14 +133,16 @@ public class LanMessengerActivity extends Activity {
 		
 		mHandler = new H();
 		
+		mListener = new LanMessengerListener();
+		
 		Intent service = new Intent(this, LanMessengerService.class);
 		bindService(service, servConn, BIND_AUTO_CREATE);
 	}
 
 	@Override
 	protected void onStart() {
-		
 		super.onStart();
+		registerListeners();
 	}
 	
 	@Override
@@ -150,15 +158,14 @@ public class LanMessengerActivity extends Activity {
 	
 	@Override
 	protected void onStop() {
-		
 		super.onStop();
+		unregisterListeners(); //onServiceDisconnected may not be invoked.
 	}
 	
 	@Override
 	protected void onDestroy() {
 		super.onDestroy();
 		unbindService(servConn);
-		unregisterListeners(); //onServiceDisconnected may not be invoked.
 		mContentUpdater.quit();
 	}
 
@@ -169,17 +176,18 @@ public class LanMessengerActivity extends Activity {
 	}
 	
 	private void registerListeners() {
-		if (mMsger == null) return;
-		if (mListener == null) mListener = new LanMessengerListener();
-		mMsger.registerDataSetObserver(mListener);
-		mMsger.regitsterOnErrorListener(mListener);
+		if (!hasListener && mMsger != null) {
+			mMsger.registerDataSetObserver(mListener);
+			mMsger.regitsterOnEventListener(mListener);
+			hasListener = true;
+		}
 	}
 	
 	private void unregisterListeners() {
-		if (mMsger != null && mListener != null) {
+		if (hasListener && mMsger != null) {
 			mMsger.unregisterDataSetObserver(mListener);
-			mMsger.unregitsterOnErrorListener(mListener);
-			mListener = null;
+			mMsger.regitsterOnEventListener(mListener);
+			hasListener = false;
 		}
 	}
 

@@ -1,8 +1,11 @@
 package com.rayleeya.lanmessenger.ui;
 
+import java.net.SocketAddress;
+
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.database.DataSetObserver;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.widget.Button;
@@ -15,7 +18,8 @@ import com.rayleeya.lanmessenger.R;
 import com.rayleeya.lanmessenger.model.User;
 import com.rayleeya.lanmessenger.service.ILanMessenger;
 import com.rayleeya.lanmessenger.service.LanMessengerService;
-import com.rayleeya.lanmessenger.util.Errors;
+import com.rayleeya.lanmessenger.service.LanMessengerService.OnEventListener;
+import com.rayleeya.lanmessenger.util.Events;
 import com.rayleeya.lanmessenger.util.Utils;
 
 public class ChatRoomActivity extends BaseActivity implements View.OnClickListener {
@@ -27,6 +31,38 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 	private ILanMessenger mMsger;
 	private User mUser;
 	
+	private ChatRoomListener mListener;
+	private boolean hasListener;
+	private class ChatRoomListener extends DataSetObserver implements OnEventListener {
+		@Override
+		public void onError(int errno, String msg) {
+			//TODO: handle errors
+		}
+		
+		@Override
+		public void onMessage(int msgno, int arg1, int arg2, Object obj) {
+			switch (msgno) {
+				case Events.MSG_RECV_VOICE_RES :
+					if (arg1 == 1) { //accept
+						if (!(obj instanceof SocketAddress)) 
+							throw new IllegalArgumentException("Arg obj should be a SocketAddress");
+						mMsger.startVoiceMsg((SocketAddress)obj);
+					} else {
+						
+					}
+					break;
+					
+			}
+		}
+
+		@Override
+		public void onChanged() {
+		}
+
+		@Override
+		public void onInvalidated() {
+		}
+	}
 	
 	private ServiceConnection servConn = new ServiceConnection() {
 		
@@ -40,9 +76,9 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 				finish(); //TODO: handle errors more gracefully
 			} else if (mMsger.hasError()) {
 				int code = mMsger.getError();
-				if (code == Errors.ERR_SO_ADDR_ALREADY_IN_USE) {
+				if (code == Events.ERR_SO_ADDR_ALREADY_IN_USE) {
 					code = R.string.err_so_addr_already_in_use;
-				} else if (code == Errors.ERR_SO) {
+				} else if (code == Events.ERR_SO) {
 					code = R.string.err_so;
 				}
 				Toast.makeText(getApplicationContext(), code, Toast.LENGTH_LONG).show();
@@ -51,6 +87,9 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 		    	if (attachUser()) {
 		    		registerListeners();
 		    		mMsger.sendVoiceRequest(mUser);
+		    	} else {
+		    		Toast.makeText(getApplicationContext(), R.string.err_attach_user_fail, Toast.LENGTH_LONG).show();
+					finish();
 		    	}
 			}
 		}
@@ -70,6 +109,8 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 		bSpeak.setText("Button");
 		bSpeak.setOnClickListener(this);
 		
+		mListener = new ChatRoomListener();
+		
 		Intent service = new Intent(this, LanMessengerService.class);
 		bindService(service, servConn, BIND_AUTO_CREATE);
 	}
@@ -79,18 +120,13 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 		int gid = i.getIntExtra(Utils.EXTRA_GROUP_ID, -1);
 		int uid = i.getIntExtra(Utils.EXTRA_USER_ID, -1);
 		mUser = mMsger.getUser(gid, uid);
-		if (mUser == null) {
-			Toast.makeText(getApplicationContext(), R.string.err_attach_user_fail, Toast.LENGTH_LONG).show();
-			finish();
-			return false;
-		}
-		return true;
+		return mUser != null;
 	}
 
 	@Override
 	protected void onStart() {
-		
 		super.onStart();
+		registerListeners();
 	}
 
 	@Override
@@ -107,15 +143,14 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 
 	@Override
 	protected void onStop() {
-		
 		super.onStop();
+		unregisterListeners(); //onServiceDisconnected may not be invoked.
 	}
 
 	@Override
 	protected void onDestroy() {
 		super.onDestroy();
 		unbindService(servConn);
-		unregisterListeners(); //onServiceDisconnected may not be invoked.
 	}
 
 	//-------- implement methods --------
@@ -132,7 +167,11 @@ public class ChatRoomActivity extends BaseActivity implements View.OnClickListen
 	
 	//----------------------------------
 	private void registerListeners() {
-		if (mMsger == null) return;
+		if (!hasListener && mMsger != null) {
+			mMsger.registerDataSetObserver(mListener);
+			mMsger.regitsterOnEventListener(mListener);
+			hasListener = true;
+		}
 	}
 	
 	private void unregisterListeners() {

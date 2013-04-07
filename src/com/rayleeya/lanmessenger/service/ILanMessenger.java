@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.rayleeya.lanmessenger.model.Group;
 import com.rayleeya.lanmessenger.model.User;
-import com.rayleeya.lanmessenger.service.LanMessengerService.OnErrorListener;
+import com.rayleeya.lanmessenger.service.LanMessengerService.OnEventListener;
 
 import android.database.DataSetObserver;
 
@@ -32,9 +32,9 @@ public interface ILanMessenger {
 	boolean receiveVoiceResponse(SocketAddress socketAddress, int accept);
 	
 	//-------------------------------------------------------
-	void regitsterOnErrorListener(OnErrorListener listener);
+	void regitsterOnEventListener(OnEventListener listener);
 	
-	void unregitsterOnErrorListener(OnErrorListener listener);
+	void unregitsterOnEventListener(OnEventListener listener);
 	
 	void registerDataSetObserver(DataSetObserver observer);
 	
@@ -55,4 +55,7 @@ public interface ILanMessenger {
 	void setError(int error);
 
 	void handleError(int errno);
+
+	//-------------------------------------------------------
+	void startVoiceMsg(SocketAddress obj);
 }
