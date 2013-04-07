@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">局域网对讲机</string>
+    <string name="menu_settings">设置</string>
+
+    <string name="def_groupname">我</string>
+        
+    <string name="btn_yes">确认</string>
+    <string name="btn_no">取消</string>
+    
+    <string name="err_so">套接字错误</string>
+    <string name="err_so_addr_already_in_use">端口已被占用</string>
+    <string name="err_attach_user_fail">绑定用户失败</string>
+        
+    <string name="msg_voice_request">你有一个通话请求</string>
+    
+</resources>
