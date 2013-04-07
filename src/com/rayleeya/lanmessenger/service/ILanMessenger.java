@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.rayleeya.lanmessenger.model.Group;
 import com.rayleeya.lanmessenger.model.User;
-import com.rayleeya.lanmessenger.service.LanMessengerManager.OnErrorListener;
+import com.rayleeya.lanmessenger.service.LanMessengerService.OnErrorListener;
 
 import android.database.DataSetObserver;
 
@@ -17,6 +17,19 @@ public interface ILanMessenger {
 	void sendExit();
 	
 	void sendAnsEntry(SocketAddress socketAddress);
+	
+	void sendVoiceRequest(User user);
+
+	void sendVoiceResponse(SocketAddress sockAddress, boolean accept);
+	
+	//-------------------------------------------------------
+	boolean receiveAddUser(User user, int groupType, String groupName);
+	
+	boolean receiveRemoveUser(User user);
+	
+	boolean receiveVoiceRequest(SocketAddress socketAddress);
+	
+	boolean receiveVoiceResponse(SocketAddress socketAddress, int accept);
 	
 	//-------------------------------------------------------
 	void regitsterOnErrorListener(OnErrorListener listener);
@@ -32,13 +45,14 @@ public interface ILanMessenger {
 	
 	User getUser(int gid, int uid);
 	
+	User getSelfUser();
+	
+	//-------------------------------------------------------
 	boolean hasError();
 	
 	int getError();
 	
 	void setError(int error);
 
-	void sendVoiceRequest(User user);
-
-	void sendVoiceResponse(SocketAddress sockAddress, boolean accept);
+	void handleError(int errno);
 }

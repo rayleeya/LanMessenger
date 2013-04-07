@@ -22,7 +22,7 @@ import com.rayleeya.lanmessenger.BuildConfig;
 import com.rayleeya.lanmessenger.R;
 import com.rayleeya.lanmessenger.model.Group;
 import com.rayleeya.lanmessenger.service.ILanMessenger;
-import com.rayleeya.lanmessenger.service.LanMessengerManager.OnErrorListener;
+import com.rayleeya.lanmessenger.service.LanMessengerService.OnErrorListener;
 import com.rayleeya.lanmessenger.service.LanMessengerService;
 import com.rayleeya.lanmessenger.util.Errors;
 

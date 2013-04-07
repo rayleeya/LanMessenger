@@ -18,7 +18,7 @@ public class MsgSenderThread extends HandlerThread {
 	private static final String TAG = "MsgSenderThread";
 	
 	private H mH;
-	private LanMessengerManager mMsgerManager;
+	private ILanMessenger mMsgerManager;
 	private UdpManager mUdpManager;
 	
 	private class H extends Handler {
@@ -93,7 +93,7 @@ public class MsgSenderThread extends HandlerThread {
 		super.start();
 	}
 
-	public void setLanMessengerManager(LanMessengerManager mgr) {
+	public void setLanMessengerManager(ILanMessenger mgr) {
 		mMsgerManager = mgr;
 	}
 	

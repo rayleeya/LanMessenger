@@ -26,7 +26,7 @@ public class MsgReceiverThread extends Thread {
 	
 	private int mPriority;
 	private boolean mRunning;
-	private LanMessengerManager mMsgerManager;
+	private ILanMessenger mMsgerManager;
 	private UdpManager mUdpManager;
 	
 	public MsgReceiverThread() {
@@ -50,7 +50,7 @@ public class MsgReceiverThread extends Thread {
 		Process.setThreadPriority(mPriority);
 	}
 	
-	public void setLanMessengerManager(LanMessengerManager mgr) {
+	public void setLanMessengerManager(ILanMessenger mgr) {
 		mMsgerManager = mgr;
 	}
 	
@@ -73,7 +73,7 @@ public class MsgReceiverThread extends Thread {
 			return;
 		}
 		
-		LanMessengerManager msgerManager = mMsgerManager;
+		ILanMessenger msgerManager = mMsgerManager;
 		DatagramPacket pack = um.createRecvDatagramPacket();
 		while (mRunning) {
 			try {

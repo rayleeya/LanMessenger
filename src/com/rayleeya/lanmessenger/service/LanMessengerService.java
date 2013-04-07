@@ -1,6 +1,7 @@
 package com.rayleeya.lanmessenger.service;
 
 import java.net.BindException;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.util.ArrayList;
@@ -15,7 +16,12 @@ import android.app.Service;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.database.DataSetObservable;
+import android.database.DataSetObserver;
+import android.os.Binder;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Message;
 import android.util.Log;
 
 import com.rayleeya.lanmessenger.BuildConfig;
@@ -41,147 +47,6 @@ public class LanMessengerService extends Service {
 	
 	public LanMessengerService() {
 		super();
-	}
-
-	private class MyMsgHandler implements LanMessengerManager.MsgHandler {
-		@Override
-		public boolean addUser(User user, int groupType, String groupName) {
-			synchronized (mUsers) {
-				if (user != null) {
-					User u = mUsers.put(user.getIp(), user);
-					Group og = null;
-					if (u != null) {
-						og = u.getGroup();
-						u.removeFromGroup();
-					}
-					
-					Group g = mGroups.get(groupName);
-					if (g == null) {
-						g = new Group(groupType, groupName);
-						mGroups.put(groupName, g);
-					}
-					g.addUser(user);
-	
-					if (user.getIp().equals(mSelf.getIp())) {
-						mSelf = user;
-					}
-					
-					if (og != null && og.getUsers().isEmpty()) mGroups.remove(og);
-					
-					return true;
-				}
-				return false;
-			}
-		}
-
-		@Override
-		public boolean removeUser(User user) {
-			synchronized (mUsers) {
-				if (user != null) {
-					User u = mUsers.remove(user.getIp());
-					if (u != null) {
-						Group g = u.getGroup();
-						u.removeFromGroup();
-						if (g != null && g.getUsers().isEmpty()) {
-							mGroups.remove(g.getName());
-						}
-					}
-					return true;
-				}
-				return false;
-			}
-		}
-		
-		@Override
-		public User getSelfUser() {
-			return mSelf;
-		}
-		
-		@Override
-		public List<Group> getGroupsAndUsers() {
-			ArrayList<Group> groups = new ArrayList<Group>();
-			if (mGroups == null || mGroups.isEmpty()) return new ArrayList<Group>();
-				
-			synchronized(mUsers) {
-				Iterator<Group> it = mGroups.values().iterator();
-				while (it.hasNext()) {
-					Group g = it.next();
-					try {
-						if (g == null || g.getUsers().size() == 0) {
-							it.remove();
-						} else {
-							Group tg = g.clone();
-							groups.add(tg);
-						}
-					} catch (CloneNotSupportedException e) {
-						e.printStackTrace();
-					}
-				}
-			}
-			
-			for (Group g : groups) {
-				Collections.sort(g.getUsers(), mUserComparator);
-			}
-			Collections.sort(groups, mGroupComparator);
-			return groups;
-		}
-		
-		@Override
-		public User getUser(int gid, int uid) {
-			User user = null;
-			try {
-				user = mGroups.get(gid).getUser(uid);
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-			return user;
-		}
-		
-		@Override
-		public void receiveVoidRequest(final SocketAddress socketAddress) {
-			final Context cxt = LanMessengerService.this.getApplicationContext();
-			AlertDialog.Builder builder = new AlertDialog.Builder(cxt);
-			builder.setMessage(R.string.msg_voice_request);
-			builder.setPositiveButton(R.string.btn_yes, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface dialog, int which) {
-					Intent i = new Intent(cxt, ChatRoomActivity.class);
-					i.putExtra(Utils.EXTRA_ADDRESS, socketAddress);
-					cxt.startActivity(i);
-					mMsgerManager.sendVoiceResponse(socketAddress, true);
-				}
-			});
-			builder.setNegativeButton(R.string.btn_no, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface dialog, int which) {
-					mMsgerManager.sendVoiceResponse(socketAddress, false);
-				}
-			});
-			builder.setOnCancelListener(new DialogInterface.OnCancelListener() {
-				@Override
-				public void onCancel(DialogInterface dialog) {
-					mMsgerManager.sendVoiceResponse(socketAddress, false);
-				}
-			});
-			
-			builder.show();
-		}
-
-		private Comparator<User> mUserComparator = new Comparator<User>() {
-			@Override
-			public int compare(User u1, User u2) {
-				if (u1 == u2) return 0;
-				return u1.getNickname().compareTo(u2.getNickname());
-			}
-		};
-		
-		private Comparator<Group> mGroupComparator = new Comparator<Group>() {
-			@Override
-			public int compare(Group g1, Group g2) {
-				if (g1 == g2) return 0;
-				return g1.getName().compareTo(g2.getName());
-			}
-		};
 	}
 	
 	@Override
@@ -220,7 +85,6 @@ public class LanMessengerService extends Service {
 		sender.setUdpManager(udpManager);
 		sender.start();
 		
-		mMsgerManager.setMsgHandler(new MyMsgHandler());
 		mMsgerManager.setError(error);
 	}
 
@@ -269,4 +133,323 @@ public class LanMessengerService extends Service {
 		return mSelf;
 	}
 	
+	
+	//-------- Error Observerable/Observers --------
+	public interface OnErrorListener {
+		public void onError(int errno, String msg);
+	}
+			
+	//------------------------------------------------------------------------------------------
+	//------------------------ The Binder Server : LanMessengerManager -------------------------
+	//------------------------------------------------------------------------------------------
+	
+	public class LanMessengerManager extends Binder implements ILanMessenger {
+		
+		private static final String TAG = "LanMessengerManager";
+		
+		private MsgSenderThread mSender;
+		private MsgReceiverThread mReceiver;
+		private H mH;
+		
+		private Comparator<User> mUserComparator = new Comparator<User>() {
+			@Override
+			public int compare(User u1, User u2) {
+				if (u1 == u2) return 0;
+				return u1.getNickname().compareTo(u2.getNickname());
+			}
+		};
+		
+		private Comparator<Group> mGroupComparator = new Comparator<Group>() {
+			@Override
+			public int compare(Group g1, Group g2) {
+				if (g1 == g2) return 0;
+				return g1.getName().compareTo(g2.getName());
+			}
+		};
+		
+		private class H extends Handler {
+
+			private static final int DATASET_REFRESH_DELAY = 200;
+			
+			private static final int MSG_HANDLE_ERROR = 1;
+			private static final int MSG_HANDLE_DATASET_CHANGED = 2;
+			private static final int MSG_HANDLE_DATASET_INVALIDATED = 3;
+			private static final int MSG_RECEIVE_VOICE_REQ = 4;
+			private static final int MSG_RECEIVE_VOICE_RES = 5;
+			
+			@Override
+			public void handleMessage(Message msg) {
+				int what = msg.what;
+				switch (what) {
+					case MSG_HANDLE_ERROR : 
+						notifyError(msg.arg1);
+						break;
+						
+					case MSG_HANDLE_DATASET_CHANGED :
+						notifyDataSetChanged();
+						break;
+						
+					case MSG_HANDLE_DATASET_INVALIDATED :
+						notifyDataSetInvalidated();
+						break;
+						
+					case MSG_RECEIVE_VOICE_REQ :
+						execReceiveVoidRequest((SocketAddress)msg.obj);
+						break;
+						
+					case MSG_RECEIVE_VOICE_RES :
+						//TODO: work is here.
+//						receiveVoidResponse((SocketAddress)msg.obj, msg.arg1);
+						break;
+				}
+			}
+		}
+		
+		public LanMessengerManager(MsgSenderThread sender, MsgReceiverThread receiver) {
+			mSender = sender;
+			mReceiver = receiver;
+			mH = new H();
+		}
+		
+		private final ArrayList<OnErrorListener> mErrorListeners = new ArrayList<OnErrorListener>();
+		private int errorcode = Errors.NO_ERROR;
+		
+		public void regitsterOnErrorListener(OnErrorListener listener) {
+			mErrorListeners.add(listener);
+		}
+		
+		public void unregitsterOnErrorListener(OnErrorListener listener) {
+			mErrorListeners.remove(listener);
+		}
+		
+		private void notifyError(int errno) {
+			String msg = ""; //Unknown error
+			switch (errno) {
+				case Errors.ERR_SO : 
+				//TODO: More detail error handlers
+				break;
+			}
+			
+			for (OnErrorListener l : mErrorListeners) {
+				l.onError(errno, msg);
+			}
+		}
+		
+		public void handleError(int errno) {
+			Message msg = mH.obtainMessage(H.MSG_HANDLE_ERROR, errno, 0);
+			mH.sendMessage(msg);
+		}
+		
+		public int getError() {
+			return errorcode;
+		}
+		
+		public void setError(int err) {
+			errorcode = err;
+		}
+		
+		public boolean hasError() {
+			return errorcode != Errors.NO_ERROR;
+		}
+		//-------- Data Set Observerable/Observers --------
+		private final DataSetObservable mDataSetObservable = new DataSetObservable();
+	    
+	    public void registerDataSetObserver(DataSetObserver observer) {
+	        mDataSetObservable.registerObserver(observer);
+	    }
+
+	    public void unregisterDataSetObserver(DataSetObserver observer) {
+	        mDataSetObservable.unregisterObserver(observer);
+	    }
+	    
+	    private void notifyDataSetInvalidated() {
+	        mDataSetObservable.notifyInvalidated();
+	    }
+	    
+	    private void notifyDataSetChanged() {
+	        mDataSetObservable.notifyChanged();
+	    }
+	    
+	    private void handleDataSetInvalidated() {
+	    	mH.removeMessages(H.MSG_HANDLE_DATASET_INVALIDATED);
+			mH.sendEmptyMessageDelayed(H.MSG_HANDLE_DATASET_INVALIDATED, H.DATASET_REFRESH_DELAY);
+	    }
+	    
+	    private void handleDataSetChanged() {
+	    	mH.removeMessages(H.MSG_HANDLE_DATASET_CHANGED);
+			mH.sendEmptyMessageDelayed(H.MSG_HANDLE_DATASET_CHANGED, H.DATASET_REFRESH_DELAY);
+	    }
+	    
+		//-------- SendXxx methods --------
+	    //-------- Run in the main thread --------
+		@Override
+		public void sendEntry() {
+			mSender.sendEntry();
+		}
+
+		@Override
+		public void sendExit() {
+			mSender.sendExit();
+		}
+
+		@Override
+		public void sendAnsEntry(SocketAddress socketAddress) {
+			mSender.sendAnsEntry(socketAddress);
+		}
+		
+		@Override
+		public void sendVoiceRequest(User user) {
+			if (user != null) {
+				SocketAddress sa = new InetSocketAddress(user.getIp(), user.getPort());
+				mSender.sendVoiceRequest(sa);
+			}
+		}
+		
+		@Override
+		public void sendVoiceResponse(SocketAddress sockAddress, boolean accept) {
+			mSender.sendVoiceResponse(sockAddress, accept);
+		}
+		
+		//-------- ReceivXxx methods --------
+		//-------- Run in the thread of MsgReceiverThread --------
+		public boolean receiveAddUser(User user, int groupType, String groupName) {
+			boolean ret = false;
+			synchronized (mUsers) {
+				if (user != null) {
+					User u = mUsers.put(user.getIp(), user);
+					Group og = null;
+					if (u != null) {
+						og = u.getGroup();
+						u.removeFromGroup();
+					}
+					
+					Group g = mGroups.get(groupName);
+					if (g == null) {
+						g = new Group(groupType, groupName);
+						mGroups.put(groupName, g);
+					}
+					g.addUser(user);
+	
+					if (user.getIp().equals(mSelf.getIp())) {
+						mSelf = user;
+					}
+					
+					if (og != null && og.getUsers().isEmpty()) mGroups.remove(og);
+					
+					ret = true;
+				}
+			}
+			handleDataSetChanged();
+			return ret;
+		}
+		
+		public boolean receiveRemoveUser(User user) {
+			boolean ret = false;
+			synchronized (mUsers) {
+				if (user != null) {
+					User u = mUsers.remove(user.getIp());
+					if (u != null) {
+						Group g = u.getGroup();
+						u.removeFromGroup();
+						if (g != null && g.getUsers().isEmpty()) {
+							mGroups.remove(g.getName());
+						}
+					}
+					ret = true;
+				}
+			}
+			handleDataSetChanged();
+			return ret;
+		}
+		
+		public boolean receiveVoiceRequest(SocketAddress socketAddress) {
+			Message msg = mH.obtainMessage(H.MSG_RECEIVE_VOICE_REQ, socketAddress);
+			mH.sendMessage(msg);
+			return true;
+		}
+		
+		private void execReceiveVoidRequest(final SocketAddress socketAddress) {
+			final Context cxt = LanMessengerService.this.getApplicationContext();
+			AlertDialog.Builder builder = new AlertDialog.Builder(cxt);
+			builder.setMessage(R.string.msg_voice_request);
+			builder.setPositiveButton(R.string.btn_yes, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					Intent i = new Intent(cxt, ChatRoomActivity.class);
+					i.putExtra(Utils.EXTRA_ADDRESS, socketAddress);
+					cxt.startActivity(i);
+					mMsgerManager.sendVoiceResponse(socketAddress, true);
+				}
+			});
+			builder.setNegativeButton(R.string.btn_no, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					mMsgerManager.sendVoiceResponse(socketAddress, false);
+				}
+			});
+			builder.setOnCancelListener(new DialogInterface.OnCancelListener() {
+				@Override
+				public void onCancel(DialogInterface dialog) {
+					mMsgerManager.sendVoiceResponse(socketAddress, false);
+				}
+			});
+			
+			builder.show();
+		}
+		
+		public boolean receiveVoiceResponse(SocketAddress socketAddress, int accept) {
+			Message msg = mH.obtainMessage(H.MSG_RECEIVE_VOICE_RES, accept, 0, socketAddress);
+			mH.sendMessage(msg);
+			return true;
+		}
+		
+		public User getSelfUser() {
+			return mSelf;
+		}
+
+		public List<Group> getGroupsAndUsers() {
+			ArrayList<Group> groups = new ArrayList<Group>();
+			if (mGroups == null || mGroups.isEmpty()) return new ArrayList<Group>();
+				
+			synchronized(mUsers) {
+				Iterator<Group> it = mGroups.values().iterator();
+				while (it.hasNext()) {
+					Group g = it.next();
+					try {
+						if (g == null || g.getUsers().size() == 0) {
+							it.remove();
+						} else {
+							Group tg = g.clone();
+							groups.add(tg);
+						}
+					} catch (CloneNotSupportedException e) {
+						e.printStackTrace();
+					}
+				}
+			}
+			
+			for (Group g : groups) {
+				Collections.sort(g.getUsers(), mUserComparator);
+			}
+			Collections.sort(groups, mGroupComparator);
+			return groups;
+		}
+		
+		@Override
+		public User getUser(int gid, int uid) {
+			User user = null;
+			try {
+				user = mGroups.get(gid).getUser(uid);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+			return user;
+		}
+		
+		public void quit() {
+			mSender.quit();
+			mReceiver.quit();
+		}
+
+	}
 }
